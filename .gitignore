@@ -6,3 +6,11 @@ dist/
 build/
 .eggs/
 
+# Node.js
+node_modules/
+first_website/backend/node_modules/
+
+# Environment / secrets
+.env
+first_website/backend/.env
+
