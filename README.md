@@ -29,7 +29,7 @@ A fast, lightweight web scraper for the first 5 minutes of a CTF web challenge.
 
 | Flag | Function | Description |
 |------|----------|-------------|
-| `--comments` | `extract_comments()` | Extract hidden HTML comments from the target page |
+| `--comments` | `extract_comments()` | Extract hidden HTML, CSS and js comments from the target page |
 | `--deep-scan` | `deep_scan()` | **Deep Source Code Extraction & Auto-Decoding** — Parses the entire raw source code of the target page, including all HTML, linked JavaScript, and CSS files. Uses Regex to hunt for encoded patterns (Base64, Hex, Binary, URL Encoded, etc.) and recursively decodes them until readable text or a recognized flag pattern (like `CTF{...}`) appears. Clearly lists all decoded data and the file it was found in, highlighting potential high-value findings. Usage: `crawl -u target.com --deep-scan` |
 | `--js` | `hunt_js_obfuscation()` | Detect and decode obfuscated JavaScript |
 | `--cookies` | `parse_jwt_cookies()` | Parse cookies and decode JWT tokens |
@@ -75,7 +75,7 @@ crawl -u <URL> [OPTIONS]
 | Argument | Description |
 |----------|-------------|
 | `-u`, `--url` | **(Required)** Target URL |
-| `--comments` | Extract HTML comments |
+| `--comments` | Extract HTML, CSS and js comments |
 | `--deep-scan` | Deep source code extraction & auto-decoding (Base64, Hex, Binary, URL Encoded, etc.) |
 | `--js` | Hunt for obfuscated JS |
 | `--cookies` | Parse / decode cookies and JWTs |
