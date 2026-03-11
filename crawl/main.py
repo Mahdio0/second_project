@@ -33,6 +33,10 @@ VERSION = "v1.2.0"
 _JS_SNIPPET_STORE = 200
 _JS_SNIPPET_DISPLAY = 120
 
+# Regex patterns for comment extraction
+_JS_COMMENT_RE = re.compile(r"//[^\r\n]*|/\*.*?\*/", re.DOTALL)
+_CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+
 
 def print_banner():
     print(Fore.CYAN + BANNER)
@@ -55,7 +59,7 @@ def build_parser():
     parser.add_argument(
         "--comments",
         action="store_true",
-        help="Extract HTML comments from the target page",
+        help="Extract comments from the target page and all linked JS/CSS files",
     )
     parser.add_argument(
         "--deep-scan",
@@ -91,7 +95,7 @@ def build_parser():
 # ---------------------------------------------------------------------------
 
 def extract_comments(url):
-    """Extract HTML comments from the target page."""
+    """Extract comments from the target page and all linked JS/CSS files."""
     try:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
@@ -100,15 +104,62 @@ def extract_comments(url):
         return
 
     soup = BeautifulSoup(response.text, "html.parser")
-    comments = soup.find_all(string=lambda text: isinstance(text, Comment))
 
-    if not comments:
+    # --- HTML comments ---
+    html_comments = soup.find_all(string=lambda text: isinstance(text, Comment))
+    if html_comments:
+        print(Fore.GREEN + f"[+] Found {len(html_comments)} HTML comment(s) in {url}:")
+        for i, comment in enumerate(html_comments, 1):
+            print(Fore.WHITE + f"  [{i}] {comment.strip()}")
+    else:
         print(Fore.YELLOW + "[~] No HTML comments found.")
-        return
 
-    print(Fore.GREEN + f"[+] Found {len(comments)} HTML comment(s):")
-    for i, comment in enumerate(comments, 1):
-        print(Fore.WHITE + f"  [{i}] {comment.strip()}")
+    # --- JS comments (inline and linked) ---
+    js_urls = []
+    for tag in soup.find_all("script", src=True):
+        src = tag["src"]
+        js_urls.append(urllib.parse.urljoin(url, src))
+
+    scripts_with_content = [tag for tag in soup.find_all("script")
+                             if tag.string and tag.string.strip()]
+    inline_scripts = [(f"inline script #{i}", tag.string)
+                      for i, tag in enumerate(scripts_with_content, 1)]
+
+    js_sources = inline_scripts[:]
+    for js_url in js_urls:
+        try:
+            js_resp = requests.get(js_url, timeout=10)
+            js_sources.append((js_url, js_resp.text))
+        except requests.RequestException:
+            pass
+
+    for label, code in js_sources:
+        matches = _JS_COMMENT_RE.findall(code)
+        matches = [m.strip() for m in matches if m.strip()]
+        if matches:
+            print(Fore.GREEN + f"[+] Found {len(matches)} JS comment(s) in {label}:")
+            for i, comment in enumerate(matches, 1):
+                print(Fore.WHITE + f"  [{i}] {comment}")
+
+    # --- CSS comments (linked stylesheets) ---
+
+    css_urls = []
+    for tag in soup.find_all("link", rel=lambda r: r and "stylesheet" in r):
+        href = tag.get("href", "")
+        if href:
+            css_urls.append(urllib.parse.urljoin(url, href))
+
+    for css_url in css_urls:
+        try:
+            css_resp = requests.get(css_url, timeout=10)
+            matches = _CSS_COMMENT_RE.findall(css_resp.text)
+            matches = [m.strip() for m in matches if m.strip()]
+            if matches:
+                print(Fore.GREEN + f"[+] Found {len(matches)} CSS comment(s) in {css_url}:")
+                for i, comment in enumerate(matches, 1):
+                    print(Fore.WHITE + f"  [{i}] {comment}")
+        except requests.RequestException:
+            pass
 
 
 def hunt_js_obfuscation(url):
