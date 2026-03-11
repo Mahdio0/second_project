@@ -31,16 +31,16 @@ A fast, lightweight web scraper for the first 5 minutes of a CTF web challenge.
 ### Option 1 — pip (standard)
 
 ```bash
-git clone https://github.com/Mahdio0/CRAWL.git
-cd CRAWL
+git clone https://github.com/Mahdio0/second_project.git
+cd second_project
 pip install .
 ```
 
 ### Option 2 — pipx (recommended for global install without polluting the system Python)
 
 ```bash
-git clone https://github.com/Mahdio0/CRAWL.git
-cd CRAWL
+git clone https://github.com/Mahdio0/second_project.git
+cd second_project
 pipx install .
 ```
 
