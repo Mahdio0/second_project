@@ -11,14 +11,23 @@ from colorama import Fore, Style, init
 init(autoreset=True)
 
 BANNER = r"""
- ______     ______     ______     __     __     __        
-/\  ___\   /\  == \   /\  __ \   /\ \  _ \ \   /\ \       
-\ \ \____  \ \  __<   \ \  __ \  \ \ \/ ".\ \  \ \ \____  
- \ \_____\  \ \_\ \_\  \ \_\ \_\  \ \__/".~\_\  \ \_____\ 
-  \/_____/   \/_/ /_/   \/_/\/_/   \/_/   \/_/   \/_____/ 
+   _____ ______  ___  _    _ _     
+  /  __ \| ___ \/ _ \| |  | | |    
+  | /  \/| |_/ / /_\ \ |  | | |    
+  | |    |    /|  _  | |/\| | |    
+  | \__/\| |\ \| | | \  /\  / |____
+   \____/\_| \_\_| |_/\/  \/\_____/
+  
+   CRAWL v1.2.0 (CTF Recon)
+   |   |      |      |
+   | +--+ +--+ +--+ +-+
+   | |A | | |A| | | |A| | | |
+   | +--+ +--+ +--+ +-+
+   |   |      |      |
+   V   V      V      V
 """
 
-VERSION = "v1.0.0"
+VERSION = "v1.2.0"
 
 # Max characters to store per JS snippet; display is trimmed further below
 _JS_SNIPPET_STORE = 200
@@ -47,6 +56,12 @@ def build_parser():
         "--comments",
         action="store_true",
         help="Extract HTML comments from the target page",
+    )
+    parser.add_argument(
+        "--deep-scan",
+        action="store_true",
+        dest="deep_scan",
+        help="Deep source code extraction & auto-decoding (Base64, Hex, Binary, URL Encoded, etc.)",
     )
     parser.add_argument(
         "--js",
@@ -187,6 +202,133 @@ def recursive_decode(data, depth=0, max_depth=10):
     return data
 
 
+def deep_scan(url):
+    """Parse entire raw source (HTML + linked JS/CSS), hunt for encoded strings,
+    and recursively decode them until readable text or a CTF flag pattern appears."""
+    ENCODED_PATTERNS = [
+        # Base64: at least 20 chars of base64 alphabet, optional padding
+        (r"[A-Za-z0-9+/]{20,}={0,2}", "possible base64"),
+        # Hex string: even-length run of hex digits (at least 8)
+        (r"\b(?:0x)?[0-9a-fA-F]{8,}\b", "possible hex"),
+        # URL-encoded: %XX sequences
+        (r"(?:%[0-9A-Fa-f]{2}){3,}", "URL encoded"),
+        # Binary string: runs of 0/1 with length divisible by 8
+        (r"\b(?:[01]{8})+\b", "possible binary"),
+    ]
+    FLAG_RE = re.compile(r"[A-Z]{2,10}\{[^}]+\}")
+
+    def _collect_sources(base_url, html_text):
+        """Return list of (label, content) tuples for the page and all linked JS/CSS."""
+        sources = [("HTML: " + base_url, html_text)]
+        soup = BeautifulSoup(html_text, "html.parser")
+
+        for tag in soup.find_all("script", src=True):
+            src = tag["src"]
+            full = urllib.parse.urljoin(base_url, src)
+            try:
+                resp = requests.get(full, timeout=10)
+                sources.append(("JS: " + full, resp.text))
+            except requests.RequestException:
+                pass
+
+        for tag in soup.find_all("link", rel=lambda r: r and "stylesheet" in r):
+            href = tag.get("href", "")
+            full = urllib.parse.urljoin(base_url, href)
+            try:
+                resp = requests.get(full, timeout=10)
+                sources.append(("CSS: " + full, resp.text))
+            except requests.RequestException:
+                pass
+
+        return sources
+
+    def _decode_binary(data):
+        """Attempt to decode a binary string (groups of 8 bits) to text."""
+        bits = data.strip()
+        if len(bits) % 8 != 0:
+            return None
+        try:
+            chars = [chr(int(bits[i:i + 8], 2)) for i in range(0, len(bits), 8)]
+            result = "".join(chars)
+            if all(c.isprintable() or c in "\n\r\t" for c in result):
+                return result
+        except ValueError:
+            pass
+        return None
+
+    def _try_decode(candidate):
+        """Try all decoders on a candidate string; return final decoded string or None."""
+        # Binary first (before hex, which might also match)
+        if re.fullmatch(r"(?:[01]{8})+", candidate):
+            result = _decode_binary(candidate)
+            if result and result != candidate:
+                return recursive_decode(result)
+
+        # URL decode
+        url_dec = urllib.parse.unquote(candidate)
+        if url_dec != candidate:
+            return recursive_decode(url_dec)
+
+        # Hex
+        hex_match = re.fullmatch(r"(?:0x)?([0-9a-fA-F]{2})+", candidate.strip())
+        if hex_match:
+            hex_str = re.sub(r"^0x", "", candidate.strip())
+            try:
+                decoded = bytes.fromhex(hex_str).decode("utf-8", errors="strict")
+                return recursive_decode(decoded)
+            except (ValueError, UnicodeDecodeError):
+                pass
+
+        # Base64
+        try:
+            padded = candidate + "=" * (-len(candidate) % 4)
+            decoded = base64.b64decode(padded).decode("utf-8", errors="strict")
+            if decoded != candidate and all(c.isprintable() or c in "\n\r\t" for c in decoded):
+                return recursive_decode(decoded)
+        except Exception:
+            pass
+
+        return None
+
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        print(Fore.RED + f"[!] Request failed: {e}")
+        return
+
+    sources = _collect_sources(url, response.text)
+    print(Fore.CYAN + f"[*] Deep-scanning {len(sources)} source file(s)...")
+
+    total_findings = 0
+    for label, content in sources:
+        file_findings = []
+        seen = set()
+        for pattern, ptype in ENCODED_PATTERNS:
+            for match in re.finditer(pattern, content):
+                candidate = match.group(0)
+                if candidate in seen:
+                    continue
+                seen.add(candidate)
+                decoded = _try_decode(candidate)
+                if decoded and decoded != candidate:
+                    is_flag = bool(FLAG_RE.search(decoded))
+                    file_findings.append((ptype, candidate[:80], decoded[:200], is_flag))
+
+        if file_findings:
+            total_findings += len(file_findings)
+            print(Fore.GREEN + f"\n[+] {label}  —  {len(file_findings)} finding(s):")
+            for ptype, raw, decoded, is_flag in file_findings:
+                flag_marker = Fore.MAGENTA + "  *** HIGH VALUE (flag pattern) ***" if is_flag else ""
+                print(Fore.WHITE + f"  [{ptype}] raw   : {raw}")
+                print(Fore.CYAN  + f"           decoded: {decoded}{flag_marker}")
+
+    if total_findings == 0:
+        print(Fore.YELLOW + "[~] No encoded strings found.")
+    else:
+        print(Fore.GREEN + f"\n[+] Deep scan complete — {total_findings} decoded finding(s) total.")
+
+
 def parse_jwt_cookies(url):
     """Parse cookies set by the target, decode JWT tokens if present."""
     try:
@@ -323,6 +465,9 @@ def main():
 
     if args.comments:
         extract_comments(url)
+
+    if args.deep_scan:
+        deep_scan(url)
 
     if args.js:
         hunt_js_obfuscation(url)
