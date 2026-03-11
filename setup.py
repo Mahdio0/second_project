@@ -13,7 +13,7 @@ setup(
     description="A fast, lightweight web scraper for the first 5 minutes of a CTF web challenge.",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/Mahdio0/CRAWL",
+    url="https://github.com/Mahdio0/second_project",
     packages=find_packages(),
     python_requires=">=3.7",
     install_requires=requirements,
